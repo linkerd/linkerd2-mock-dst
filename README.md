@@ -1,5 +1,19 @@
 # linkerd2-mock-dst
 
+This repository contains a mock implementation of Linkerd 2's [Destination
+service][dst-svc], intended for proxy testing and benchmarking. 
+
+Unlike the real Destination service, which serves service discovery requests
+from proxies based on information in the Kubernetes API, the mock implementation
+currently serves a fixed set of destinations and endpoints. In the future, it
+will also support simulating changes in cluster state for testing purposes.
+
+The mock Destination service may be run in a standalone process as a
+command-line application. Additionally, it can also be used as a Rust library,
+to embed a mock Destination service in Rust tests.
+
+[dst-svc]: https://linkerd.io/2/reference/architecture/#destination
+
 ## Usage
 
 ```
