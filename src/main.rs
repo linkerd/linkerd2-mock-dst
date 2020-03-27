@@ -1,4 +1,4 @@
-use linkerd2_mock_dst::{DestinationServer, DstSpec};
+use linkerd2_mock_dst::DstSpec;
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
