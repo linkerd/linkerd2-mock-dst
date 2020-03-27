@@ -6,17 +6,14 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
     net::SocketAddr,
-    str::FromStr,
     sync::{Arc, Weak},
 };
 use tracing_futures::Instrument;
 
 use tokio::sync::{mpsc, watch, RwLock};
-use tracing_error::TracedError;
-#[derive(Debug, Default)]
-pub struct DstSpec {
-    dsts: HashMap<Dst, Endpoints>,
-}
+
+pub use self::spec::{DstSpec, ParseError};
+mod spec;
 
 #[derive(Debug, Clone)]
 pub struct DstService {
@@ -31,10 +28,8 @@ pub struct DstHandle {
 
 type SharedState<T> = RwLock<HashMap<Dst, watch::Receiver<T>>>;
 
-#[derive(Debug)]
-pub struct ParseError {
-    reason: &'static str,
-}
+#[derive(Debug, PartialEq, Eq, Default, Clone)]
+struct Endpoints(HashSet<SocketAddr>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Dst {
@@ -42,50 +37,21 @@ struct Dst {
     name: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Default, Clone)]
-struct Endpoints(HashSet<SocketAddr>);
-
-macro_rules! parse_error {
-    ($reason:expr) => {{
-        return tracing_error::InstrumentResult::in_current_span(Err(ParseError {
-            reason: $reason,
-        }));
-    }};
-}
-
 type GrpcResult<T> = Result<T, tonic::Status>;
-
-// === impl DstSpec ===
-
-impl FromStr for DstSpec {
-    type Err = TracedError<ParseError>;
-    #[tracing::instrument(name = "DstSpec::from_str", level = "error")]
-    fn from_str(spec: &str) -> Result<Self, Self::Err> {
-        #[tracing::instrument(level = "info")]
-        fn parse_entry(entry: &str) -> Result<(Dst, Endpoints), TracedError<ParseError>> {
-            let mut parts = entry.split('=');
-            match (parts.next(), parts.next(), parts.next()) {
-                (_, _, Some(_)) => parse_error!("too many '='s"),
-                (None, _, _) | (_, None, None) => parse_error!("no destination or endpoints"),
-                (Some(dst), Some(endpoints), None) => {
-                    let dst = dst.parse()?;
-                    let endpoints = endpoints.parse()?;
-                    tracing::trace!(?dst, ?endpoints, "parsed");
-                    Ok((dst, endpoints))
-                }
-            }
-        }
-
-        let dsts = spec.split(';').map(parse_entry).collect::<Result<_, _>>()?;
-        Ok(Self { dsts })
-    }
-}
 
 impl DstSpec {
     pub fn into_svc(self) -> (DstHandle, DstService) {
+        DstService::from_spec(self)
+    }
+}
+
+// === impl DstService ===
+
+impl DstService {
+    fn from_spec(spec: DstSpec) -> (DstHandle, DstService) {
         let mut txs = HashMap::new();
         let mut rxs = HashMap::new();
-        for (dst, eps) in self.dsts.into_iter() {
+        for (dst, eps) in spec.dsts.into_iter() {
             let (tx, rx) = watch::channel(eps);
             txs.insert(dst.clone(), tx);
             rxs.insert(dst, rx);
@@ -93,13 +59,9 @@ impl DstSpec {
         let state = Arc::new(RwLock::new(rxs));
         let rxs = Arc::downgrade(&state);
         let handle = DstHandle { dsts: txs, rxs };
-        (handle, DstService { state })
+        (handle, Self { state })
     }
-}
 
-// === impl DstService ===
-
-impl DstService {
     /// Serves the mock Destination service on the specified socket address.
     pub async fn serve(
         self,
@@ -228,55 +190,5 @@ impl Destination for DstService {
         }
         .instrument(req_span)
         .await
-    }
-}
-
-// === impl ParseError ===
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.reason, f)
-    }
-}
-
-impl Error for ParseError {}
-
-// === impl Dst ===
-
-impl FromStr for Dst {
-    type Err = TracedError<ParseError>;
-    #[tracing::instrument(name = "Dst::from_str", level = "error")]
-    fn from_str(dst: &str) -> Result<Self, Self::Err> {
-        let mut parts = dst.split("://");
-        match (parts.next(), parts.next(), parts.next()) {
-            (_, _, Some(_)) => parse_error!("too many schemes"),
-            (None, _, _) | (_, None, None) => parse_error!("no scheme"),
-            (Some(scheme), Some(name), None) => Ok(Self {
-                scheme: scheme.to_owned(),
-                name: name.to_owned(),
-            }),
-        }
-    }
-}
-
-// === impl Endpoints ===
-
-impl FromStr for Endpoints {
-    type Err = TracedError<ParseError>;
-
-    #[tracing::instrument(name = "Endpoints::from_str", level = "error")]
-    fn from_str(endpoints: &str) -> Result<Self, Self::Err> {
-        let endpoints = endpoints
-            .split(',')
-            .map(|addr| {
-                let span = tracing::error_span!("parse_addr", ?addr);
-                let _g = span.enter();
-                match addr.parse() {
-                    Ok(ep) => Ok(ep),
-                    Err(_) => parse_error!("invalid socket address"),
-                }
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(Self(endpoints))
     }
 }
