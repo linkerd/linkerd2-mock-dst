@@ -72,6 +72,7 @@ impl DstService {
         tracing::info!(parent: &span, "starting destination server...");
 
         tonic::transport::Server::builder()
+            .trace_fn(|headers| tracing::debug_span!("request", ?headers))
             .add_service(DestinationServer::new(self))
             .serve(addr)
             .instrument(span)
@@ -154,41 +155,30 @@ impl Destination for DstService {
         &self,
         req: tonic::Request<GetDestination>,
     ) -> GrpcResult<tonic::Response<Self::GetStream>> {
-        let req_span = tracing::debug_span!("dst_request", remote.addr = ?req.remote_addr(), metadata = ?req.metadata());
-        async {
-            tracing::trace!("received destination request");
-            let GetDestination {
-                scheme,
-                path,
-                context_token,
-            } = req.into_inner();
-            tracing::debug!(?context_token);
-            let stream = self.stream_destination(scheme, path).await;
-            Ok(tonic::Response::new(stream))
-        }
-        .instrument(req_span)
-        .await
+        let GetDestination {
+            scheme,
+            path,
+            context_token,
+        } = req.into_inner();
+        tracing::debug!(?context_token);
+        let stream = self.stream_destination(scheme, path).await;
+        Ok(tonic::Response::new(stream))
     }
 
     async fn get_profile(
         &self,
         req: tonic::Request<GetDestination>,
     ) -> GrpcResult<tonic::Response<Self::GetProfileStream>> {
-        let req_span = tracing::debug_span!("profile_request", remote.addr = ?req.remote_addr(), metadata = ?req.metadata());
-        async {
-            tracing::trace!("received profile request");
-            let GetDestination {
-                scheme,
-                path,
-                context_token,
-            } = req.into_inner();
-            tracing::debug!(?context_token);
-            tracing::info!(?scheme, ?path, "profiles are not yet implemented");
-            Err(tonic::Status::invalid_argument(
-                "profiles are not yet implemented",
-            ))
-        }
-        .instrument(req_span)
-        .await
+        tracing::trace!("received profile request");
+        let GetDestination {
+            scheme,
+            path,
+            context_token,
+        } = req.into_inner();
+        tracing::debug!(?context_token);
+        tracing::info!(?scheme, ?path, "profiles are not yet implemented");
+        Err(tonic::Status::invalid_argument(
+            "profiles are not yet implemented",
+        ))
     }
 }
