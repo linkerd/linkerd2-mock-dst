@@ -100,6 +100,24 @@ impl DstSpec {
 // === impl DstService ===
 
 impl DstService {
+    /// Serves the mock Destination service on the specified socket address.
+    pub async fn serve(
+        self,
+        addr: impl Into<SocketAddr>,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+        let addr = addr.into();
+        let span = tracing::info_span!("DstService::serve", listen.addr = %addr);
+        tracing::info!(parent: &span, "starting destination server...");
+
+        tonic::transport::Server::builder()
+            .add_service(DestinationServer::new(self))
+            .serve(addr)
+            .instrument(span)
+            .await?;
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self), level = "info")]
     async fn stream_destination(
         &self,
@@ -217,7 +235,7 @@ impl Destination for DstService {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "parse error: {}", self.reason)
+        std::fmt::Display::fmt(&self.reason, f)
     }
 }
 

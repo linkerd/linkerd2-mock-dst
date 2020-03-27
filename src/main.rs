@@ -40,11 +40,7 @@ async fn main() -> Result<(), Termination> {
     let CliOpts { dsts, addr } = opts;
 
     let (_handle, svc) = dsts.into_svc();
-    tracing::info!(listen.addr = %addr, "starting destination server...");
-    tonic::transport::Server::builder()
-        .add_service(DestinationServer::new(svc))
-        .serve(addr)
-        .await?;
+    svc.serve(addr).await?;
     Ok(())
 }
 
@@ -73,8 +69,8 @@ impl fmt::Display for Termination {
     }
 }
 
-impl<E: Error + 'static> From<E> for Termination {
+impl<E: Into<Box<dyn Error + Send + Sync + 'static>>> From<E> for Termination {
     fn from(e: E) -> Self {
-        Self(Box::new(e))
+        Self(e.into())
     }
 }
