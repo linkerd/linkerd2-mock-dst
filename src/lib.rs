@@ -68,7 +68,7 @@ impl DstService {
     ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         let addr = addr.into();
         let span = tracing::info_span!("DstService::serve", listen.addr = %addr);
-        tracing::info!(parent: &span, "starting destination server...");
+        tracing::info!(parent: &span, "Starting destination server...");
 
         tonic::transport::Server::builder()
             .trace_fn(|headers| tracing::debug_span!("request", ?headers))
@@ -84,7 +84,7 @@ impl DstService {
     async fn stream_destination(&self, dst: &Dst) -> mpsc::Receiver<GrpcResult<Update>> {
         let state = self.state.read().await.get(dst).cloned();
         if let Some(mut state) = state {
-            tracing::info!(?dst, "exists");
+            tracing::info!("Serving endpoints");
             let (mut tx, rx) = mpsc::channel(8);
             tokio::spawn(
                 async move {
@@ -119,15 +119,15 @@ impl DstService {
                         }
                         prev = curr;
                     }
-                    tracing::debug!("watch ended");
+                    tracing::debug!("Watch ended");
                     Ok(())
                 }
-                .map_err(|_: mpsc::error::SendError<_>| tracing::info!("lookup closed"))
+                .map_err(|_: mpsc::error::SendError<_>| tracing::info!("Lookup closed"))
                 .in_current_span(),
             );
             rx
         } else {
-            tracing::info!(?dst, "does not exist");
+            tracing::info!("Does not exist");
             let (mut tx, rx) = mpsc::channel(1);
             let _ = tx
                 .send(Ok(pb::Update {
@@ -160,10 +160,9 @@ impl Destination for DstService {
 
     async fn get_profile(
         &self,
-        req: tonic::Request<GetDestination>,
+        _: tonic::Request<GetDestination>,
     ) -> GrpcResult<tonic::Response<Self::GetProfileStream>> {
-        let GetDestination { path, .. } = req.into_inner();
-        tracing::debug!(?path, "not implemented");
+        tracing::debug!("Not implemented");
         Err(tonic::Status::invalid_argument("not implemented"))
     }
 }
