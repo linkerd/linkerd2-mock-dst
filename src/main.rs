@@ -2,7 +2,6 @@ use linkerd2_mock_dst::DstSpec;
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
-
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -36,8 +35,8 @@ async fn main() -> Result<(), Termination> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let opts = CliOpts::from_args();
-    tracing::trace!(opts = format_args!("{:#?}", opts));
     let CliOpts { dsts, addr } = opts;
+    tracing::debug!(?dsts);
 
     let (_handle, svc) = dsts.into_svc();
     svc.serve(addr).await?;

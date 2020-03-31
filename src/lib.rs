@@ -8,9 +8,8 @@ use std::{
     net::SocketAddr,
     sync::{Arc, Weak},
 };
-use tracing_futures::Instrument;
-
 use tokio::sync::{mpsc, watch, RwLock};
+use tracing_futures::Instrument;
 
 pub use self::spec::{DstSpec, ParseError};
 mod spec;
@@ -33,8 +32,8 @@ struct Endpoints(HashSet<SocketAddr>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Dst {
-    scheme: String,
     name: String,
+    port: u16,
 }
 
 type GrpcResult<T> = Result<T, tonic::Status>;
@@ -82,14 +81,10 @@ impl DstService {
     }
 
     #[tracing::instrument(skip(self), level = "info")]
-    async fn stream_destination(
-        &self,
-        scheme: String,
-        name: String,
-    ) -> mpsc::Receiver<GrpcResult<Update>> {
-        let state = self.state.read().await.get(&Dst { scheme, name }).cloned();
+    async fn stream_destination(&self, dst: &Dst) -> mpsc::Receiver<GrpcResult<Update>> {
+        let state = self.state.read().await.get(dst).cloned();
         if let Some(mut state) = state {
-            tracing::info!("destination exists");
+            tracing::info!(?dst, "exists");
             let (mut tx, rx) = mpsc::channel(8);
             tokio::spawn(
                 async move {
@@ -132,12 +127,12 @@ impl DstService {
             );
             rx
         } else {
-            tracing::info!("destination does not exist");
+            tracing::info!(?dst, "does not exist");
             let (mut tx, rx) = mpsc::channel(1);
             let _ = tx
                 .send(Ok(pb::Update {
                     update: Some(pb::update::Update::NoEndpoints(pb::NoEndpoints {
-                        exists: true,
+                        exists: false,
                     })),
                 }))
                 .await;
@@ -149,19 +144,17 @@ impl DstService {
 #[tonic::async_trait]
 impl Destination for DstService {
     type GetStream = mpsc::Receiver<GrpcResult<Update>>;
-
     type GetProfileStream = mpsc::Receiver<GrpcResult<DestinationProfile>>;
+
     async fn get(
         &self,
         req: tonic::Request<GetDestination>,
     ) -> GrpcResult<tonic::Response<Self::GetStream>> {
-        let GetDestination {
-            scheme,
-            path,
-            context_token,
-        } = req.into_inner();
-        tracing::debug!(?context_token);
-        let stream = self.stream_destination(scheme, path).await;
+        let GetDestination { path, .. } = req.into_inner();
+        let dst = path
+            .parse()
+            .map_err(|_| tonic::Status::invalid_argument("invalid dst"))?;
+        let stream = self.stream_destination(&dst).await;
         Ok(tonic::Response::new(stream))
     }
 
@@ -169,16 +162,8 @@ impl Destination for DstService {
         &self,
         req: tonic::Request<GetDestination>,
     ) -> GrpcResult<tonic::Response<Self::GetProfileStream>> {
-        tracing::trace!("received profile request");
-        let GetDestination {
-            scheme,
-            path,
-            context_token,
-        } = req.into_inner();
-        tracing::debug!(?context_token);
-        tracing::info!(?scheme, ?path, "profiles are not yet implemented");
-        Err(tonic::Status::invalid_argument(
-            "profiles are not yet implemented",
-        ))
+        let GetDestination { path, .. } = req.into_inner();
+        tracing::debug!(?path, "not implemented");
+        Err(tonic::Status::invalid_argument("not implemented"))
     }
 }
