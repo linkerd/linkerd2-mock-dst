@@ -97,10 +97,10 @@ impl DstService {
                     let mut prev = HashMap::new();
 
                     while let Some(Endpoints(curr)) = state.recv().await {
-                        let (mut added, mut removed) = (vec![], vec![]);
-
-                        for (addr, EndpointMeta { h2 }) in curr.iter() {
-                            if !prev.contains_key(addr) {
+                        let added = curr
+                            .iter()
+                            .filter(|(addr, _)| !prev.contains_key(*addr))
+                            .map(|(addr, EndpointMeta { h2 })| {
                                 let protocol_hint = if *h2 {
                                     Some(pb::ProtocolHint {
                                         protocol: Some(pb::protocol_hint::Protocol::H2(
@@ -110,36 +110,34 @@ impl DstService {
                                 } else {
                                     None
                                 };
-                                added.push(pb::WeightedAddr {
+                                pb::WeightedAddr {
                                     addr: Some(addr.into()),
                                     protocol_hint,
                                     ..Default::default()
-                                })
-                            }
-                        }
-
-                        for addr in prev.keys() {
-                            if !curr.contains_key(addr) {
-                                removed.push(addr.into());
-                            }
-                        }
-
-                        if !removed.is_empty() {
-                            tracing::debug!(?removed);
-                            tx.send(Ok(pb::Update {
-                                update: Some(pb::update::Update::Remove(pb::AddrSet {
-                                    addrs: removed,
-                                })),
-                            }))
-                            .await?;
-                        }
-
+                                }
+                            })
+                            .collect::<Vec<_>>();
                         if !added.is_empty() {
                             tracing::debug!(?added);
                             tx.send(Ok(pb::Update {
                                 update: Some(pb::update::Update::Add(pb::WeightedAddrSet {
                                     addrs: added,
                                     ..Default::default()
+                                })),
+                            }))
+                            .await?;
+                        }
+
+                        let removed = prev
+                            .keys()
+                            .filter(|addr| !curr.contains_key(addr))
+                            .map(Into::into)
+                            .collect::<Vec<_>>();
+                        if !removed.is_empty() {
+                            tracing::debug!(?removed);
+                            tx.send(Ok(pb::Update {
+                                update: Some(pb::update::Update::Remove(pb::AddrSet {
+                                    addrs: removed,
                                 })),
                             }))
                             .await?;

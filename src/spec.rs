@@ -89,6 +89,7 @@ impl FromStr for Endpoints {
                 let span = tracing::error_span!("parse_addr", ?addr);
                 let _g = span.enter();
 
+                // Addresses may have the suffix `#h2` to indicate they support h2 upgrading.
                 let mut parts = addr.splitn(2, '#');
                 match (parts.next(), parts.next()) {
                     (Some(addr), h2) => match addr.parse() {
