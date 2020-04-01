@@ -3,8 +3,9 @@ use linkerd2_proxy_api_tonic::destination as pb;
 pub use pb::destination_server::DestinationServer;
 use pb::{destination_server::Destination, DestinationProfile, GetDestination, Update};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     error::Error,
+    hash::Hash,
     net::SocketAddr,
     sync::{Arc, Weak},
 };
@@ -27,8 +28,13 @@ pub struct DstHandle {
 
 type SharedState<T> = RwLock<HashMap<Dst, watch::Receiver<T>>>;
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+struct EndpointMeta {
+    h2: bool,
+}
+
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
-struct Endpoints(HashSet<SocketAddr>);
+struct Endpoints(HashMap<SocketAddr, EndpointMeta>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Dst {
@@ -88,16 +94,36 @@ impl DstService {
             let (mut tx, rx) = mpsc::channel(8);
             tokio::spawn(
                 async move {
-                    let mut prev = HashSet::new();
+                    let mut prev = HashMap::new();
+
                     while let Some(Endpoints(curr)) = state.recv().await {
-                        let added = curr
-                            .difference(&prev)
-                            .map(|addr| pb::WeightedAddr {
-                                addr: Some(addr.into()),
-                                ..Default::default()
-                            })
-                            .collect::<Vec<_>>();
-                        let removed = prev.difference(&curr).map(Into::into).collect::<Vec<_>>();
+                        let (mut added, mut removed) = (vec![], vec![]);
+
+                        for (addr, EndpointMeta { h2 }) in curr.iter() {
+                            if !prev.contains_key(addr) {
+                                let protocol_hint = if *h2 {
+                                    Some(pb::ProtocolHint {
+                                        protocol: Some(pb::protocol_hint::Protocol::H2(
+                                            pb::protocol_hint::H2::default(),
+                                        )),
+                                    })
+                                } else {
+                                    None
+                                };
+                                added.push(pb::WeightedAddr {
+                                    addr: Some(addr.into()),
+                                    protocol_hint,
+                                    ..Default::default()
+                                })
+                            }
+                        }
+
+                        for addr in prev.keys() {
+                            if !curr.contains_key(addr) {
+                                removed.push(addr.into());
+                            }
+                        }
+
                         if !removed.is_empty() {
                             tracing::debug!(?removed);
                             tx.send(Ok(pb::Update {
@@ -107,6 +133,7 @@ impl DstService {
                             }))
                             .await?;
                         }
+
                         if !added.is_empty() {
                             tracing::debug!(?added);
                             tx.send(Ok(pb::Update {
@@ -117,6 +144,7 @@ impl DstService {
                             }))
                             .await?;
                         }
+
                         prev = curr;
                     }
                     tracing::debug!("Watch ended");

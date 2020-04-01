@@ -1,4 +1,4 @@
-use super::{Dst, Endpoints};
+use super::{Dst, EndpointMeta, Endpoints};
 use std::{collections::HashMap, error::Error, str::FromStr};
 use tracing_error::{prelude::*, TracedError};
 
@@ -88,9 +88,19 @@ impl FromStr for Endpoints {
             .map(|addr| {
                 let span = tracing::error_span!("parse_addr", ?addr);
                 let _g = span.enter();
-                match addr.parse() {
-                    Ok(ep) => Ok(ep),
-                    Err(_) => parse_error!("invalid socket address"),
+
+                let mut parts = addr.splitn(2, '#');
+                match (parts.next(), parts.next()) {
+                    (Some(addr), h2) => match addr.parse() {
+                        Ok(addr) => Ok((
+                            addr,
+                            EndpointMeta {
+                                h2: h2.map(|proto| proto == "h2").unwrap_or(false),
+                            },
+                        )),
+                        Err(_) => parse_error!("invalid socket address"),
+                    },
+                    _ => parse_error!("empty socket address"),
                 }
             })
             .collect::<Result<_, _>>()?;
