@@ -1,4 +1,4 @@
-use super::{Dst, Endpoints};
+use super::{Dst, EndpointMeta, Endpoints};
 use std::{collections::HashMap, error::Error, str::FromStr};
 use tracing_error::{prelude::*, TracedError};
 
@@ -22,6 +22,7 @@ macro_rules! parse_error {
 
 impl FromStr for DstSpec {
     type Err = TracedError<ParseError>;
+
     #[tracing::instrument(name = "DstSpec::from_str", level = "error")]
     fn from_str(spec: &str) -> Result<Self, Self::Err> {
         #[tracing::instrument(level = "info")]
@@ -58,16 +59,19 @@ impl Error for ParseError {}
 
 impl FromStr for Dst {
     type Err = TracedError<ParseError>;
+
     #[tracing::instrument(name = "Dst::from_str", level = "error")]
     fn from_str(dst: &str) -> Result<Self, Self::Err> {
-        let mut parts = dst.split("://");
-        match (parts.next(), parts.next(), parts.next()) {
-            (_, _, Some(_)) => parse_error!("too many schemes"),
-            (None, _, _) | (_, None, None) => parse_error!("no scheme"),
-            (Some(scheme), Some(name), None) => Ok(Self {
-                scheme: scheme.to_owned(),
-                name: name.to_owned(),
-            }),
+        let mut parts = dst.splitn(2, ":");
+        match (parts.next(), parts.next()) {
+            (Some(name), Some(port)) => match port.parse() {
+                Ok(port) => Ok(Dst {
+                    port,
+                    name: name.into(),
+                }),
+                Err(_) => parse_error!("invalid port"),
+            },
+            _ => parse_error!("invalid destination"),
         }
     }
 }
@@ -84,9 +88,20 @@ impl FromStr for Endpoints {
             .map(|addr| {
                 let span = tracing::error_span!("parse_addr", ?addr);
                 let _g = span.enter();
-                match addr.parse() {
-                    Ok(ep) => Ok(ep),
-                    Err(_) => parse_error!("invalid socket address"),
+
+                // Addresses may have the suffix `#h2` to indicate they support h2 upgrading.
+                let mut parts = addr.splitn(2, '#');
+                match (parts.next(), parts.next()) {
+                    (Some(addr), h2) => match addr.parse() {
+                        Ok(addr) => Ok((
+                            addr,
+                            EndpointMeta {
+                                h2: h2.map(|proto| proto == "h2").unwrap_or(false),
+                            },
+                        )),
+                        Err(_) => parse_error!("invalid socket address"),
+                    },
+                    _ => parse_error!("empty socket address"),
                 }
             })
             .collect::<Result<_, _>>()?;

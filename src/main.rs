@@ -1,8 +1,6 @@
-use linkerd2_mock_dst::DstSpec;
-use std::error::Error;
+use linkerd2_mock_dst::DstSpec; use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
-
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -19,8 +17,9 @@ struct CliOpts {
     ///
     /// This is parsed as a list of `DESTINATION=ENDPOINTS` pairs, where
     /// `DESTINATION` is a scheme, DNS name, and port, and `ENDPOINTS` is a
-    /// comma-separated list of socket addresses. Each pair is separated by
-    /// semicolons.
+    /// comma-separated list of endpoints. Each pair is separated by
+    /// semicolons. An endpoint consists of a an `IP:PORT` and an optional
+    /// `#h2` suffix, if the endpoint supports meshed protocol upgrading.
     #[structopt(name = "DSTS", env = "LINKERD2_MOCK_DSTS", parse(try_from_str = parse_dsts))]
     dsts: DstSpec,
 }
@@ -36,8 +35,8 @@ async fn main() -> Result<(), Termination> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let opts = CliOpts::from_args();
-    tracing::trace!(opts = format_args!("{:#?}", opts));
     let CliOpts { dsts, addr } = opts;
+    tracing::debug!(?dsts);
 
     let (_handle, svc) = dsts.into_svc();
     svc.serve(addr).await?;
