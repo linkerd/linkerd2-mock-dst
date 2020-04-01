@@ -1,5 +1,4 @@
-use linkerd2_mock_dst::DstSpec;
-use std::error::Error;
+use linkerd2_mock_dst::DstSpec; use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
 use structopt::StructOpt;
@@ -18,8 +17,9 @@ struct CliOpts {
     ///
     /// This is parsed as a list of `DESTINATION=ENDPOINTS` pairs, where
     /// `DESTINATION` is a scheme, DNS name, and port, and `ENDPOINTS` is a
-    /// comma-separated list of socket addresses. Each pair is separated by
-    /// semicolons.
+    /// comma-separated list of endpoints. Each pair is separated by
+    /// semicolons. An endpoint consists of a an `IP:PORT` and an optional
+    /// `#h2` suffix, if the endpoint supports meshed protocol upgrading.
     #[structopt(name = "DSTS", env = "LINKERD2_MOCK_DSTS", parse(try_from_str = parse_dsts))]
     dsts: DstSpec,
 }
