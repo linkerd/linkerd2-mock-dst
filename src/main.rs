@@ -1,4 +1,5 @@
-use linkerd2_mock_dst::DstSpec; use std::error::Error;
+use linkerd2_mock_dst::{DstService, EndpointsSpec, OverridesSpec};
+use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
 use structopt::StructOpt;
@@ -13,15 +14,23 @@ struct CliOpts {
     #[structopt(short = "a", long = "addr", default_value = "0.0.0.0:8086")]
     addr: SocketAddr,
 
-    /// A list of mock destinations to serve.
+    /// A list of destination endpoints to serve.
     ///
-    /// This is parsed as a list of `DESTINATION=ENDPOINTS` pairs, where
-    /// `DESTINATION` is a scheme, DNS name, and port, and `ENDPOINTS` is a
-    /// comma-separated list of endpoints. Each pair is separated by
-    /// semicolons. An endpoint consists of a an `IP:PORT` and an optional
-    /// `#h2` suffix, if the endpoint supports meshed protocol upgrading.
-    #[structopt(name = "DSTS", env = "LINKERD2_MOCK_DSTS", parse(try_from_str = parse_dsts))]
-    dsts: DstSpec,
+    /// This is parsed as a list of `DESTINATION=ENDPOINTS` pairs, where `DESTINATION` is a DNS name
+    /// and port, and `ENDPOINTS` is a comma-separated list of endpoints. Each pair is separated by
+    /// semicolons. An endpoint consists of a an`IP:PORT` and an optional `#h2` suffix, if the
+    /// endpoint supports meshed protocol upgrading.
+    #[structopt(long = "endpoints", env = "LINKERD2_MOCK_DST_ENDPOINTS", parse(try_from_str = parse_endpoints))]
+    endpoints: EndpointsSpec,
+
+    /// A list of destination overrides to serve.
+    ///
+    /// This is parsed as a list of `DESTINATION=OVERRIDES` pairs, where `DESTINATION` is a DNS name
+    /// and port, and `OVERRIDES` is a comma-separated list of overrides. Each pair is separated by
+    /// semicolons. An override consists of a an `NAME:PORT` and an optional `*WEIGHT` suffix.
+    /// `WEIGHT`s are integers. If unspecifified, the default weight of 1000 is used.
+    #[structopt(long = "overrides", env = "LINKERD2_MOCK_DST_OVERRIDES", parse(try_from_str = parse_overrides))]
+    overrides: OverridesSpec,
 }
 
 #[tokio::main]
@@ -35,16 +44,24 @@ async fn main() -> Result<(), Termination> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let opts = CliOpts::from_args();
-    let CliOpts { dsts, addr } = opts;
-    tracing::debug!(?dsts);
+    let CliOpts {
+        endpoints,
+        overrides,
+        addr,
+    } = opts;
+    tracing::debug!(?endpoints, ?overrides);
 
-    let (_handle, svc) = dsts.into_svc();
+    let (_sender, svc) = DstService::new(endpoints, overrides);
     svc.serve(addr).await?;
     Ok(())
 }
 
-fn parse_dsts(dsts: &str) -> Result<DstSpec, Termination> {
-    dsts.parse().map_err(Into::into)
+fn parse_endpoints(s: &str) -> Result<EndpointsSpec, Termination> {
+    s.parse().map_err(Into::into)
+}
+
+fn parse_overrides(s: &str) -> Result<OverridesSpec, Termination> {
+    s.parse().map_err(Into::into)
 }
 
 struct Termination(Box<dyn Error>);
