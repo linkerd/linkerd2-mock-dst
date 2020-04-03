@@ -1,0 +1,48 @@
+
+name: Rust PR
+
+# Run on pushes to master, and on all pull requests.
+on:
+  push:
+    branches:
+    - master
+  pull_request: {}
+
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@94c2de7
+      - name: Install toolchain
+        uses: actions-rs/toolchain@4d38309
+        with:
+          # Install a "minimal" rust toolchain (without docs, etc)
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Run cargo check
+        uses: actions-rs/cargo@e8634b4
+        with:
+          command: check
+          args: --all --examples --tests --benches
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@94c2de7
+      - name: Install toolchain
+        uses: actions-rs/toolchain@4d38309
+        with:
+          # Install a "minimal" rust toolchain (without docs, etc), but 
+          # include rustfmt.  
+          toolchain: stable
+          profile: minimal 
+          override: true
+          components: rustfmt 
+      - name: Run rustfmt
+        uses: actions-rs/cargo@e8634b4
+        with:
+          command: fmt
+          args: --all -- --check
