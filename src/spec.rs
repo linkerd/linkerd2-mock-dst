@@ -154,7 +154,7 @@ impl FromStr for Overrides {
                 let span = tracing::error_span!("parse_addr", ?addr);
                 let _g = span.enter();
 
-                // Destiantions may have the suffix `*W` to indicate a weight.
+                // Destinations may have the suffix `*W` to indicate a weight.
                 let mut parts = addr.splitn(2, '*');
                 match (parts.next(), parts.next()) {
                     (Some(dst), weight) => match (dst.parse(), weight) {
