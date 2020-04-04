@@ -30,6 +30,10 @@ impl FromStr for EndpointsSpec {
 
     #[tracing::instrument(name = "EndpointsSpec::from_str", level = "error")]
     fn from_str(spec: &str) -> Result<Self, Self::Err> {
+        if spec.is_empty() {
+            return Ok(Self::default());
+        }
+
         #[tracing::instrument(level = "info")]
         fn parse_entry(entry: &str) -> Result<(Dst, Endpoints), TracedError<ParseError>> {
             let mut parts = entry.split('=');
@@ -121,6 +125,10 @@ impl FromStr for OverridesSpec {
 
     #[tracing::instrument(name = "OverridesSpec::from_str", level = "error")]
     fn from_str(spec: &str) -> Result<Self, Self::Err> {
+        if spec.is_empty() {
+            return Ok(Self::default());
+        }
+
         #[tracing::instrument(level = "info")]
         fn parse_entry(entry: &str) -> Result<(Dst, Overrides), TracedError<ParseError>> {
             let mut parts = entry.split('=');

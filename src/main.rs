@@ -20,7 +20,7 @@ struct CliOpts {
     /// and port, and `ENDPOINTS` is a comma-separated list of endpoints. Each pair is separated by
     /// semicolons. An endpoint consists of a an`IP:PORT` and an optional `#h2` suffix, if the
     /// endpoint supports meshed protocol upgrading.
-    #[structopt(long = "endpoints", env = "LINKERD2_MOCK_DST_ENDPOINTS", parse(try_from_str = parse_endpoints))]
+    #[structopt(long = "endpoints", env = "LINKERD2_MOCK_DST_ENDPOINTS", default_value = "", parse(try_from_str = parse_endpoints))]
     endpoints: EndpointsSpec,
 
     /// A list of destination overrides to serve.
@@ -29,7 +29,7 @@ struct CliOpts {
     /// and port, and `OVERRIDES` is a comma-separated list of overrides. Each pair is separated by
     /// semicolons. An override consists of a an `NAME:PORT` and an optional `*WEIGHT` suffix.
     /// `WEIGHT`s are integers. If unspecifified, the default weight of 1000 is used.
-    #[structopt(long = "overrides", env = "LINKERD2_MOCK_DST_OVERRIDES", parse(try_from_str = parse_overrides))]
+    #[structopt(long = "overrides", env = "LINKERD2_MOCK_DST_OVERRIDES", default_value = "", parse(try_from_str = parse_overrides))]
     overrides: OverridesSpec,
 }
 
