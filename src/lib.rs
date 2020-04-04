@@ -123,6 +123,8 @@ impl DstService {
             }
         };
 
+        let concrete_name = dst.to_string();
+
         tracing::info!("Serving endpoints");
         let (mut tx, rx) = mpsc::channel(8);
         tokio::spawn(
@@ -143,19 +145,29 @@ impl DstService {
                             } else {
                                 None
                             };
+
+                            let mut metric_labels = HashMap::default();
+                            metric_labels.insert("addr".to_string(), addr.to_string());
+                            metric_labels.insert("h2".to_string(), h2.to_string());
+
                             pb::WeightedAddr {
                                 addr: Some(addr.into()),
                                 protocol_hint,
+                                metric_labels,
                                 ..Default::default()
                             }
                         })
                         .collect::<Vec<_>>();
                     if !added.is_empty() {
                         tracing::debug!(?added);
+
+                        let mut metric_labels = HashMap::default();
+                        metric_labels.insert("concrete".to_string(), concrete_name.clone());
+
                         tx.send(Ok(pb::Update {
                             update: Some(pb::update::Update::Add(pb::WeightedAddrSet {
                                 addrs: added,
-                                ..Default::default()
+                                metric_labels,
                             })),
                         }))
                         .await?;

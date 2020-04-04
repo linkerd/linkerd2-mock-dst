@@ -49,7 +49,7 @@ async fn main() -> Result<(), Termination> {
         overrides,
         addr,
     } = opts;
-    tracing::debug!(?endpoints, ?overrides);
+    tracing::debug!(?endpoints, ?overrides, ?addr);
 
     let (_sender, svc) = DstService::new(endpoints, overrides);
     svc.serve(addr).await?;
