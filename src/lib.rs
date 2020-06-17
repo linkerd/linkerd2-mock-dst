@@ -1,5 +1,5 @@
 use futures::prelude::*;
-use linkerd2_proxy_api_tonic::destination::{
+use linkerd2_proxy_api::destination::{
     self as pb,
     destination_server::{Destination, DestinationServer},
 };
