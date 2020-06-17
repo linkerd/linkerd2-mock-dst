@@ -113,11 +113,7 @@ impl DstService {
                 tracing::info!("Does not exist");
                 let (mut tx, rx) = mpsc::channel(1);
                 let _ = tx
-                    .send(Ok(pb::Update {
-                        update: Some(pb::update::Update::NoEndpoints(pb::NoEndpoints {
-                            exists: false,
-                        })),
-                    }))
+                    .send(Err(tonic::Status::invalid_argument("not configured")))
                     .await;
                 return rx;
             }
@@ -210,7 +206,9 @@ impl DstService {
             None => {
                 tracing::info!("Does not exist");
                 let (mut tx, rx) = mpsc::channel(1);
-                let _ = tx.send(Ok(pb::DestinationProfile::default())).await;
+                let _ = tx
+                    .send(Err(tonic::Status::invalid_argument("not configured")))
+                    .await;
                 return rx;
             }
         };
