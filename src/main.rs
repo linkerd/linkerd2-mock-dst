@@ -1,4 +1,4 @@
-use linkerd2_mock_dst::{DstService, EndpointsSpec, OverridesSpec};
+use linkerd2_mock_dst::{DstService, EndpointsSpec, FsWatcher, OverridesSpec};
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
@@ -31,6 +31,12 @@ struct CliOpts {
     /// `WEIGHT`s are integers. If unspecifified, the default weight of 1000 is used.
     #[structopt(long = "overrides", env = "LINKERD2_MOCK_DST_OVERRIDES", default_value = "", parse(try_from_str = parse_overrides))]
     overrides: OverridesSpec,
+
+    #[structopt(
+        long = "endpoints_watch_directory",
+        env = "LINKERD2_MOCK_DST_ENDPOINTS_WATCH_DIRECTORY"
+    )]
+    endpoints_watch_directory: Option<String>,
 }
 
 #[tokio::main]
@@ -48,11 +54,21 @@ async fn main() -> Result<(), Termination> {
         endpoints,
         overrides,
         addr,
+        endpoints_watch_directory,
     } = opts;
-    tracing::debug!(?endpoints, ?overrides, ?addr);
+    tracing::debug!(?endpoints, ?overrides, ?addr, ?endpoints_watch_directory);
 
-    let (_sender, svc) = DstService::new(endpoints, overrides);
-    svc.serve(addr).await?;
+    match endpoints_watch_directory {
+        Some(endpoints) => {
+            let (sender, svc) = DstService::empty();
+            let mut fs_watcher = FsWatcher::new(endpoints, sender);
+            futures::try_join!(svc.serve(addr), fs_watcher.watch())?;
+        }
+        None => {
+            let (_sender, svc) = DstService::new(endpoints, overrides);
+            svc.serve(addr).await?;
+        }
+    };
     Ok(())
 }
 

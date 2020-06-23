@@ -1,5 +1,6 @@
 use super::{Dst, EndpointMeta, Endpoints, Overrides};
-use std::{collections::HashMap, error::Error, str::FromStr};
+use std::collections::{BTreeMap, HashMap};
+use std::{default::Default, error::Error, str::FromStr};
 use tracing_error::{prelude::*, TracedError};
 
 #[derive(Debug, Default)]
@@ -105,7 +106,12 @@ impl FromStr for Endpoints {
                         Ok(addr) => Ok((
                             addr,
                             EndpointMeta {
+                                address: addr,
                                 h2: h2.map(|proto| proto == "h2").unwrap_or(false),
+                                weight: 10_000,
+                                metric_labels: BTreeMap::default(),
+                                tls_identity: None,
+                                authority_override: None,
                             },
                         )),
                         Err(_) => parse_error!("invalid socket address"),
