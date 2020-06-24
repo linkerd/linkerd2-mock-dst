@@ -32,6 +32,12 @@ struct CliOpts {
     #[structopt(long = "overrides", env = "LINKERD2_MOCK_DST_OVERRIDES", default_value = "", parse(try_from_str = parse_overrides))]
     overrides: OverridesSpec,
 
+    /// A directory that is dynamically watched for endpoints updates
+    ///
+    /// The directory contains files with names in the form of {dst.name}:{port}. Each file should
+    /// contain the json representation of a list of `EndpointMeta` objects. Not that if such a
+    /// directory is provided the `endpoints` and `overrides` opts will be ignored and the discovery
+    /// state will be derived from the contents of the directory only.
     #[structopt(
         long = "endpoints_watch_directory",
         env = "LINKERD2_MOCK_DST_ENDPOINTS_WATCH_DIRECTORY"
