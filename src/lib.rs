@@ -62,6 +62,11 @@ impl DstSender {
         if let Some(sender) = self.endpoints.remove(&dst) {
             tracing::info!("dropping sender");
             drop(sender);
+            if let Some(inner) = self.inner.upgrade() {
+                tokio::spawn(async move {
+                    inner.endpoints.write().await.remove(&dst);
+                });
+            }
         } else {
             tracing::info!("Dst not found");
         }
@@ -161,6 +166,13 @@ impl DstService {
         Ok(())
     }
 
+    fn is_add(prev: &HashMap<SocketAddr, EndpointMeta>, ep: &EndpointMeta) -> bool {
+        match prev.get(&ep.address) {
+            Some(prev_ep) => prev_ep != ep,
+            None => true,
+        }
+    }
+
     #[tracing::instrument(skip(self), level = "info")]
     async fn stream_endpoints(&self, dst: &Dst) -> mpsc::Receiver<GrpcResult<pb::Update>> {
         let mut endpoints_rx = match self.inner.endpoints.read().await.get(dst) {
@@ -194,7 +206,7 @@ impl DstService {
                     } else {
                         let added = curr
                             .iter()
-                            .filter(|(addr, _)| !prev.contains_key(*addr))
+                            .filter(|(_, ep)| Self::is_add(&prev, ep))
                             .map(|(addr, meta)| {
                                 let protocol_hint = if meta.h2 {
                                     Some(pb::ProtocolHint {
