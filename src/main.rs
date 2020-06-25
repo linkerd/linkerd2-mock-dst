@@ -36,7 +36,7 @@ struct CliOpts {
     /// A directory that is dynamically watched for endpoints updates
     ///
     /// The directory contains files with names in the form of {dst.name}:{port}. Each file should
-    /// contain the json representation of a list of `EndpointMeta` objects. Not that if such a
+    /// contain the json or yaml representation of a list of `EndpointMeta` objects. Note that if such a
     /// directory is provided the `endpoints` and `overrides` opts will be ignored and the discovery
     /// state will be derived from the contents of the directory only.
     #[structopt(
