@@ -6,8 +6,7 @@ use serde_json;
 use std::error::Error;
 use std::ffi::OsString;
 use std::mem;
-use std::string::String;
-use std::{fs, path};
+use std::{fs, path::PathBuf};
 use tokio::stream::StreamExt;
 
 use crate::Dst;
@@ -18,12 +17,12 @@ const EVENT_BUF_SZ: usize =
 
 #[derive(Debug)]
 pub struct FsWatcher {
-    endpoints_dir: String,
+    endpoints_dir: PathBuf,
     dst_sender: DstSender,
 }
 
 impl FsWatcher {
-    pub fn new(endpoints_dir: String, dst_sender: DstSender) -> Self {
+    pub fn new(endpoints_dir: PathBuf, dst_sender: DstSender) -> Self {
         Self {
             endpoints_dir,
             dst_sender,
@@ -41,7 +40,7 @@ impl FsWatcher {
                 tracing::info!(?dst, "deleted");
                 self.dst_sender.delete_dst(dst);
             } else {
-                let path = path::Path::new(&self.endpoints_dir).join(file_name);
+                let path = self.endpoints_dir.join(file_name);
                 let contents = fs::read_to_string(path)?;
                 let dsts = serde_json::from_str::<Vec<EndpointMeta>>(&contents)?
                     .into_iter()
@@ -59,13 +58,16 @@ impl FsWatcher {
         let mut inotify = Inotify::init()?;
         let mask = WatchMask::MODIFY | WatchMask::DELETE;
         inotify.add_watch(self.endpoints_dir.clone(), mask)?;
-        let stream = inotify.event_stream(Vec::from(&[0; EVENT_BUF_SZ][..]))?;
+        let stream = inotify.event_stream(vec![0; EVENT_BUF_SZ])?;
         stream
             .map(|event| {
-                if let Ok(event) = event {
-                    if let Err(e) = self.handle_event(event) {
-                        tracing::error!(?e, "error handing event");
+                match event {
+                    Ok(event) => {
+                        if let Err(e) = self.handle_event(event) {
+                            tracing::error!(?e, "error handing event");
+                        }
                     }
+                    Err(e) => tracing::error!(?e, "inotify stream error"),
                 }
                 Ok(())
             })

@@ -2,6 +2,7 @@ use linkerd2_mock_dst::{DstService, EndpointsSpec, FsWatcher, OverridesSpec};
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -39,10 +40,10 @@ struct CliOpts {
     /// directory is provided the `endpoints` and `overrides` opts will be ignored and the discovery
     /// state will be derived from the contents of the directory only.
     #[structopt(
-        long = "endpoints_watch_directory",
-        env = "LINKERD2_MOCK_DST_ENDPOINTS_WATCH_DIRECTORY"
+        long = "endpoints_dir",
+                env = "LINKERD2_MOCK_DST_ENDPOINTS_DIR",  conflicts_with_all = &["overrides", "endpoints"],
     )]
-    endpoints_watch_directory: Option<String>,
+    endpoints_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -60,11 +61,11 @@ async fn main() -> Result<(), Termination> {
         endpoints,
         overrides,
         addr,
-        endpoints_watch_directory,
+        endpoints_dir,
     } = opts;
-    tracing::debug!(?endpoints, ?overrides, ?addr, ?endpoints_watch_directory);
+    tracing::debug!(?endpoints, ?overrides, ?addr, ?endpoints_dir);
 
-    match endpoints_watch_directory {
+    match endpoints_dir {
         Some(endpoints) => {
             let (sender, svc) = DstService::empty();
             let mut fs_watcher = FsWatcher::new(endpoints, sender);

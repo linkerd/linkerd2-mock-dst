@@ -173,6 +173,40 @@ impl DstService {
         }
     }
 
+    fn to_weighted_addr(meta: &EndpointMeta) -> pb::WeightedAddr {
+        let protocol_hint = if meta.h2 {
+            Some(pb::ProtocolHint {
+                protocol: Some(pb::protocol_hint::Protocol::H2(
+                    pb::protocol_hint::H2::default(),
+                )),
+            })
+        } else {
+            None
+        };
+
+        let mut metric_labels = HashMap::default();
+        metric_labels.insert("addr".to_string(), meta.address.to_string());
+        metric_labels.insert("h2".to_string(), meta.h2.to_string());
+        metric_labels.extend(meta.metric_labels.clone());
+
+        let addr = &meta.address;
+        pb::WeightedAddr {
+            addr: Some(addr.into()),
+            weight: meta.weight,
+            protocol_hint,
+            metric_labels,
+            tls_identity: meta.tls_identity.clone().map(|name| pb::TlsIdentity {
+                strategy: Some(pb::tls_identity::Strategy::DnsLikeIdentity(
+                    pb::tls_identity::DnsLikeIdentity { name },
+                )),
+            }),
+            authority_override: meta
+                .authority_override
+                .clone()
+                .map(|authority_override| pb::AuthorityOverride { authority_override }),
+        }
+    }
+
     #[tracing::instrument(skip(self), level = "info")]
     async fn stream_endpoints(&self, dst: &Dst) -> mpsc::Receiver<GrpcResult<pb::Update>> {
         let mut endpoints_rx = match self.inner.endpoints.read().await.get(dst) {
@@ -205,45 +239,9 @@ impl DstService {
                         .await?
                     } else {
                         let added = curr
-                            .iter()
-                            .filter(|(_, ep)| Self::is_add(&prev, ep))
-                            .map(|(addr, meta)| {
-                                let protocol_hint = if meta.h2 {
-                                    Some(pb::ProtocolHint {
-                                        protocol: Some(pb::protocol_hint::Protocol::H2(
-                                            pb::protocol_hint::H2::default(),
-                                        )),
-                                    })
-                                } else {
-                                    None
-                                };
-
-                                let mut metric_labels = HashMap::default();
-                                metric_labels.insert("addr".to_string(), addr.to_string());
-                                metric_labels.insert("h2".to_string(), meta.h2.to_string());
-                                metric_labels.extend(meta.metric_labels.clone());
-
-                                pb::WeightedAddr {
-                                    addr: Some(addr.into()),
-                                    weight: meta.weight,
-                                    protocol_hint,
-                                    metric_labels,
-                                    tls_identity: meta.tls_identity.clone().map(|name| {
-                                        pb::TlsIdentity {
-                                            strategy: Some(
-                                                pb::tls_identity::Strategy::DnsLikeIdentity(
-                                                    pb::tls_identity::DnsLikeIdentity { name },
-                                                ),
-                                            ),
-                                        }
-                                    }),
-                                    authority_override: meta.authority_override.clone().map(
-                                        |authority_override| pb::AuthorityOverride {
-                                            authority_override,
-                                        },
-                                    ),
-                                }
-                            })
+                            .values()
+                            .filter(|meta| Self::is_add(&prev, meta))
+                            .map(Self::to_weighted_addr)
                             .collect::<Vec<_>>();
                         if !added.is_empty() {
                             tracing::debug!(?added);
