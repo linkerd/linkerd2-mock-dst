@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     default::Default,
-    error::Error,
     fmt,
     hash::Hash,
     net::SocketAddr,
@@ -21,6 +20,8 @@ pub use self::spec::{EndpointsSpec, OverridesSpec, ParseError};
 
 mod fs_watcher;
 mod spec;
+
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[derive(Clone, Debug)]
 pub struct DstService {
@@ -36,11 +37,7 @@ pub struct DstSender {
 
 impl DstSender {
     #[tracing::instrument(skip(self), name = "DstSender::send_endpoints", level = "info")]
-    pub fn send_endpoints(
-        &mut self,
-        dst: Dst,
-        endpoints: Endpoints,
-    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    pub fn send_endpoints(&mut self, dst: Dst, endpoints: Endpoints) -> Result<(), Error> {
         if let Some(sender) = self.endpoints.get(&dst) {
             tracing::info!("Dst present");
             sender.broadcast(endpoints)?;
@@ -148,10 +145,7 @@ impl DstService {
     }
 
     /// Serves the mock Destination service on the specified socket address.
-    pub async fn serve(
-        self,
-        addr: impl Into<SocketAddr>,
-    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    pub async fn serve(self, addr: impl Into<SocketAddr>) -> Result<(), Error> {
         let addr = addr.into();
         let span = tracing::info_span!("DstService::serve", listen.addr = %addr);
         tracing::info!(parent: &span, "Starting destination server...");

@@ -2,11 +2,11 @@ use crate::Dst;
 use crate::DstSender;
 use crate::EndpointMeta;
 use crate::Endpoints;
+use crate::Error;
 use inotify::{Event, EventMask, Inotify, WatchMask};
 use inotify_sys as ffi;
 use serde_json;
 use serde_yaml;
-use std::error::Error;
 use std::ffi::OsString;
 use std::mem;
 use std::{fs, path::PathBuf};
@@ -38,7 +38,7 @@ macro_rules! fs_watcher_error {
     }};
 }
 
-// === impl ParseError ===
+// === impl FsWatcherError ===
 
 impl std::fmt::Display for FsWatcherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -46,7 +46,7 @@ impl std::fmt::Display for FsWatcherError {
     }
 }
 
-impl Error for FsWatcherError {}
+impl std::error::Error for FsWatcherError {}
 
 impl FsWatcher {
     pub fn new(endpoints_dir: PathBuf, dst_sender: DstSender) -> Self {
@@ -56,9 +56,7 @@ impl FsWatcher {
         }
     }
 
-    fn parse_dst(
-        file_name: &str,
-    ) -> Result<(Dst, FileType), Box<dyn Error + Send + Sync + 'static>> {
+    fn parse_dst(file_name: &str) -> Result<(Dst, FileType), Error> {
         let mut parts = file_name.rsplitn(2, ".");
         match (parts.next(), parts.next()) {
             (Some(ext), Some(name)) => {
@@ -74,11 +72,7 @@ impl FsWatcher {
         }
     }
 
-    fn parse_file(
-        &self,
-        file_name: &str,
-        ft: FileType,
-    ) -> Result<Endpoints, Box<dyn Error + Send + Sync + 'static>> {
+    fn parse_file(&self, file_name: &str, ft: FileType) -> Result<Endpoints, Error> {
         let path = self.endpoints_dir.join(file_name);
         let contents = fs::read_to_string(path)?;
         let destinations = match ft {
@@ -94,10 +88,7 @@ impl FsWatcher {
     }
 
     #[tracing::instrument(skip(self), name = "FsWatcher::handle_event", level = "info")]
-    fn handle_event(
-        &mut self,
-        ev: Event<OsString>,
-    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    fn handle_event(&mut self, ev: Event<OsString>) -> Result<(), Error> {
         if let Some(file_name) = ev.name.and_then(|s| s.to_str().map(|s| s.to_string())) {
             let (dst, ft) = Self::parse_dst(&file_name)?;
             if ev.mask == EventMask::DELETE {
@@ -112,7 +103,7 @@ impl FsWatcher {
         Ok(())
     }
 
-    pub async fn watch(&mut self) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    pub async fn watch(&mut self) -> Result<(), Error> {
         let mut inotify = Inotify::init()?;
         let mask = WatchMask::MODIFY | WatchMask::DELETE;
         inotify.add_watch(self.endpoints_dir.clone(), mask)?;
