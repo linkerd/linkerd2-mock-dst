@@ -9,6 +9,7 @@ use serde_json;
 use serde_yaml;
 use std::ffi::OsString;
 use std::mem;
+use std::string::String;
 use std::{fs, path::PathBuf};
 use tokio::stream::StreamExt;
 
@@ -29,7 +30,7 @@ enum FileType {
 
 #[derive(Debug)]
 pub struct FsWatcherError {
-    reason: &'static str,
+    reason: String,
 }
 
 macro_rules! fs_watcher_error {
@@ -64,11 +65,11 @@ impl FsWatcher {
                 let ft = match ext {
                     "yaml" => FileType::Yaml,
                     "json" => FileType::Json,
-                    _ => fs_watcher_error!("invalid file ext"),
+                    _ => fs_watcher_error!(format!("invalid file ext {}", ext)),
                 };
                 Ok((dst, ft))
             }
-            _ => fs_watcher_error!("invalid file ext"),
+            _ => fs_watcher_error!(format!("invalid file name {}", file_name)),
         }
     }
 
@@ -77,10 +78,10 @@ impl FsWatcher {
         let contents = fs::read_to_string(path)?;
         let destinations = match ft {
             FileType::Json => {
-                serde_json::from_str::<Vec<EndpointMeta>>(&contents).map_err(|e| e.into())
+                serde_json::from_str::<Vec<EndpointMeta>>(&contents).map_err(Into::into)
             }
             FileType::Yaml => {
-                serde_yaml::from_str::<Vec<EndpointMeta>>(&contents).map_err(|e| e.into())
+                serde_yaml::from_str::<Vec<EndpointMeta>>(&contents).map_err(Into::into)
             }
         };
 
@@ -88,16 +89,16 @@ impl FsWatcher {
     }
 
     #[tracing::instrument(skip(self), name = "FsWatcher::handle_event", level = "info")]
-    fn handle_event(&mut self, ev: Event<OsString>) -> Result<(), Error> {
+    async fn handle_event(&mut self, ev: Event<OsString>) -> Result<(), Error> {
         if let Some(file_name) = ev.name.and_then(|s| s.to_str().map(|s| s.to_string())) {
             let (dst, ft) = Self::parse_dst(&file_name)?;
             if ev.mask == EventMask::DELETE {
                 tracing::info!(?dst, "deleted");
-                self.dst_sender.delete_dst(dst);
+                self.dst_sender.delete_dst(dst).await;
             } else {
                 let endpoints = self.parse_file(&file_name, ft)?;
                 tracing::info!(?endpoints, "added");
-                self.dst_sender.send_endpoints(dst, endpoints)?
+                self.dst_sender.send_endpoints(dst, endpoints).await?;
             }
         }
         Ok(())
@@ -107,20 +108,17 @@ impl FsWatcher {
         let mut inotify = Inotify::init()?;
         let mask = WatchMask::MODIFY | WatchMask::DELETE;
         inotify.add_watch(self.endpoints_dir.clone(), mask)?;
-        let stream = inotify.event_stream(vec![0; EVENT_BUF_SZ])?;
-        stream
-            .map(|event| {
-                match event {
-                    Ok(event) => {
-                        if let Err(e) = self.handle_event(event) {
-                            tracing::error!(?e, "error handing event");
-                        }
+        let mut stream = inotify.event_stream(vec![0; EVENT_BUF_SZ])?;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(event) => {
+                    if let Err(e) = self.handle_event(event).await {
+                        tracing::error!(?e, "error handing event");
                     }
-                    Err(e) => tracing::error!(?e, "inotify stream error"),
                 }
-                Ok(())
-            })
-            .collect()
-            .await
+                Err(e) => tracing::error!(?e, "inotify stream error"),
+            }
+        }
+        Ok(())
     }
 }
