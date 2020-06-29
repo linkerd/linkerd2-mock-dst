@@ -6,7 +6,7 @@ edition = "2018"
 publish = false
 
 [dependencies]
-tokio = { version = "0.2", features = ["macros", "rt-threaded", "sync", "blocking"] }
+tokio = { version = "0.2", features = ["macros", "rt-threaded", "sync", "fs"] }
 tonic = "0.2.1"
 linkerd2-proxy-api = { git = "https://github.com/linkerd/linkerd2-proxy-api", features = ["transport"] }
 tracing = "0.1"

@@ -9,8 +9,8 @@ use serde_json;
 use serde_yaml;
 use std::ffi::OsString;
 use std::mem;
+use std::path::PathBuf;
 use std::string::String;
-use std::{fs, path::PathBuf};
 use tokio::stream::StreamExt;
 
 const EVENT_BUF_SZ: usize =
@@ -63,7 +63,7 @@ impl FsWatcher {
             (Some(ext), Some(name)) => {
                 let dst: Dst = name.parse()?;
                 let ft = match ext {
-                    "yaml" => FileType::Yaml,
+                    "yaml" | "yml" => FileType::Yaml,
                     "json" => FileType::Json,
                     _ => fs_watcher_error!(format!("invalid file ext {}", ext)),
                 };
@@ -73,9 +73,9 @@ impl FsWatcher {
         }
     }
 
-    fn parse_file(&self, file_name: &str, ft: FileType) -> Result<Endpoints, Error> {
+    async fn parse_file(&self, file_name: &str, ft: FileType) -> Result<Endpoints, Error> {
         let path = self.endpoints_dir.join(file_name);
-        let contents = fs::read_to_string(path)?;
+        let contents = tokio::fs::read_to_string(path).await?;
         let destinations = match ft {
             FileType::Json => {
                 serde_json::from_str::<Vec<EndpointMeta>>(&contents).map_err(Into::into)
@@ -96,7 +96,7 @@ impl FsWatcher {
                 tracing::info!(?dst, "deleted");
                 self.dst_sender.delete_dst(dst).await;
             } else {
-                let endpoints = self.parse_file(&file_name, ft)?;
+                let endpoints = self.parse_file(&file_name, ft).await?;
                 tracing::info!(?endpoints, "added");
                 self.dst_sender.send_endpoints(dst, endpoints).await?;
             }
@@ -113,10 +113,10 @@ impl FsWatcher {
             match event {
                 Ok(event) => {
                     if let Err(e) = self.handle_event(event).await {
-                        tracing::error!(?e, "error handing event");
+                        tracing::error!(%e, "error handing event");
                     }
                 }
-                Err(e) => tracing::error!(?e, "inotify stream error"),
+                Err(e) => tracing::error!(%e, "inotify stream error"),
             }
         }
         Ok(())
