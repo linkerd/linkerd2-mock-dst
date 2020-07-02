@@ -3,9 +3,10 @@ use linkerd2_proxy_api::destination::{
     self as pb,
     destination_server::{Destination, DestinationServer},
 };
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
-    error::Error,
+    collections::{BTreeMap, HashMap},
+    default::Default,
     fmt,
     hash::Hash,
     net::SocketAddr,
@@ -14,8 +15,13 @@ use std::{
 use tokio::sync::{mpsc, watch, RwLock};
 use tracing_futures::Instrument;
 
+pub use self::fs_watcher::FsWatcher;
 pub use self::spec::{EndpointsSpec, OverridesSpec, ParseError};
+
+mod fs_watcher;
 mod spec;
+
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[derive(Clone, Debug)]
 pub struct DstService {
@@ -29,6 +35,37 @@ pub struct DstSender {
     inner: Weak<Inner>,
 }
 
+impl DstSender {
+    #[tracing::instrument(skip(self), name = "DstSender::send_endpoints", level = "info")]
+    pub async fn send_endpoints(&mut self, dst: Dst, endpoints: Endpoints) -> Result<(), Error> {
+        if let Some(sender) = self.endpoints.get(&dst) {
+            tracing::info!("Dst present");
+            sender.broadcast(endpoints)?;
+        } else {
+            tracing::info!("Dst non present");
+            if let Some(inner) = self.inner.upgrade() {
+                let (tx, rx) = watch::channel(endpoints);
+                self.endpoints.insert(dst.clone(), tx);
+                inner.endpoints.write().await.insert(dst, rx);
+            }
+        }
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), name = "DstSender::delete_dst", level = "info")]
+    pub async fn delete_dst(&mut self, dst: Dst) {
+        if let Some(sender) = self.endpoints.remove(&dst) {
+            tracing::info!("dropping sender");
+            drop(sender);
+            if let Some(inner) = self.inner.upgrade() {
+                inner.endpoints.write().await.remove(&dst);
+            }
+        } else {
+            tracing::info!("Dst not found");
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Inner {
     endpoints: RwLock<HashMap<Dst, watch::Receiver<Endpoints>>>,
@@ -36,18 +73,24 @@ pub struct Inner {
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
-struct Endpoints(HashMap<SocketAddr, EndpointMeta>);
+pub struct Endpoints(HashMap<SocketAddr, EndpointMeta>);
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
-struct EndpointMeta {
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct EndpointMeta {
+    address: SocketAddr,
     h2: bool,
+    weight: u32,
+    #[serde(default)]
+    metric_labels: BTreeMap<String, String>,
+    tls_identity: Option<String>,
+    authority_override: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
 struct Overrides(HashMap<Dst, u32>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct Dst {
+pub struct Dst {
     name: String,
     port: u16,
 }
@@ -57,6 +100,17 @@ type GrpcResult<T> = Result<T, tonic::Status>;
 // === impl DstService ===
 
 impl DstService {
+    pub fn empty() -> (DstSender, DstService) {
+        DstService::new(
+            EndpointsSpec {
+                dsts: HashMap::new(),
+            },
+            OverridesSpec {
+                dsts: HashMap::new(),
+            },
+        )
+    }
+
     pub fn new(endpoints: EndpointsSpec, overrides: OverridesSpec) -> (DstSender, DstService) {
         let mut endpoints_txs = HashMap::new();
         let mut endpoints_rxs = HashMap::new();
@@ -87,10 +141,7 @@ impl DstService {
     }
 
     /// Serves the mock Destination service on the specified socket address.
-    pub async fn serve(
-        self,
-        addr: impl Into<SocketAddr>,
-    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    pub async fn serve(self, addr: impl Into<SocketAddr>) -> Result<(), Error> {
         let addr = addr.into();
         let span = tracing::info_span!("DstService::serve", listen.addr = %addr);
         tracing::info!(parent: &span, "Starting destination server...");
@@ -128,65 +179,59 @@ impl DstService {
                 let mut prev = HashMap::new();
 
                 while let Some(Endpoints(curr)) = endpoints_rx.recv().await {
-                    let added = curr
-                        .iter()
-                        .filter(|(addr, _)| !prev.contains_key(*addr))
-                        .map(|(addr, EndpointMeta { h2 })| {
-                            let protocol_hint = if *h2 {
-                                Some(pb::ProtocolHint {
-                                    protocol: Some(pb::protocol_hint::Protocol::H2(
-                                        pb::protocol_hint::H2::default(),
-                                    )),
-                                })
-                            } else {
-                                None
-                            };
+                    if curr.is_empty() {
+                        tx.send(Ok(pb::Update {
+                            update: Some(pb::update::Update::NoEndpoints(pb::NoEndpoints {
+                                exists: true,
+                            })),
+                        }))
+                        .await?
+                    } else {
+                        let added = curr
+                            .values()
+                            .filter(|meta| meta.is_add(&prev))
+                            .map(EndpointMeta::to_weighted_addr)
+                            .collect::<Vec<_>>();
+                        if !added.is_empty() {
+                            tracing::debug!(?added);
 
                             let mut metric_labels = HashMap::default();
-                            metric_labels.insert("addr".to_string(), addr.to_string());
-                            metric_labels.insert("h2".to_string(), h2.to_string());
+                            metric_labels.insert("concrete".to_string(), concrete_name.clone());
 
-                            pb::WeightedAddr {
-                                addr: Some(addr.into()),
-                                protocol_hint,
-                                metric_labels,
-                                ..Default::default()
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    if !added.is_empty() {
-                        tracing::debug!(?added);
+                            tx.send(Ok(pb::Update {
+                                update: Some(pb::update::Update::Add(pb::WeightedAddrSet {
+                                    addrs: added,
+                                    metric_labels,
+                                })),
+                            }))
+                            .await?;
+                        }
 
-                        let mut metric_labels = HashMap::default();
-                        metric_labels.insert("concrete".to_string(), concrete_name.clone());
-
-                        tx.send(Ok(pb::Update {
-                            update: Some(pb::update::Update::Add(pb::WeightedAddrSet {
-                                addrs: added,
-                                metric_labels,
-                            })),
-                        }))
-                        .await?;
-                    }
-
-                    let removed = prev
-                        .keys()
-                        .filter(|addr| !curr.contains_key(addr))
-                        .map(Into::into)
-                        .collect::<Vec<_>>();
-                    if !removed.is_empty() {
-                        tracing::debug!(?removed);
-                        tx.send(Ok(pb::Update {
-                            update: Some(pb::update::Update::Remove(pb::AddrSet {
-                                addrs: removed,
-                            })),
-                        }))
-                        .await?;
+                        let removed = prev
+                            .keys()
+                            .filter(|addr| !curr.contains_key(addr))
+                            .map(Into::into)
+                            .collect::<Vec<_>>();
+                        if !removed.is_empty() {
+                            tracing::debug!(?removed);
+                            tx.send(Ok(pb::Update {
+                                update: Some(pb::update::Update::Remove(pb::AddrSet {
+                                    addrs: removed,
+                                })),
+                            }))
+                            .await?;
+                        }
                     }
 
                     prev = curr;
                 }
                 tracing::debug!("Watch ended");
+                tx.send(Ok(pb::Update {
+                    update: Some(pb::update::Update::NoEndpoints(pb::NoEndpoints {
+                        exists: false,
+                    })),
+                }))
+                .await?;
                 Ok(())
             }
             .map_err(|_: mpsc::error::SendError<_>| tracing::info!("Lookup closed"))
@@ -280,5 +325,50 @@ impl Destination for DstService {
 impl fmt::Display for Dst {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.name, self.port)
+    }
+}
+
+// === impl EndpointMeta ===
+
+impl EndpointMeta {
+    fn to_weighted_addr(&self) -> pb::WeightedAddr {
+        let protocol_hint = if self.h2 {
+            Some(pb::ProtocolHint {
+                protocol: Some(pb::protocol_hint::Protocol::H2(
+                    pb::protocol_hint::H2::default(),
+                )),
+            })
+        } else {
+            None
+        };
+
+        let mut metric_labels = HashMap::default();
+        metric_labels.insert("addr".to_string(), self.address.to_string());
+        metric_labels.insert("h2".to_string(), self.h2.to_string());
+        metric_labels.extend(self.metric_labels.clone());
+
+        let ref addr = self.address;
+        pb::WeightedAddr {
+            addr: Some(addr.into()),
+            weight: self.weight,
+            protocol_hint,
+            metric_labels,
+            tls_identity: self.tls_identity.clone().map(|name| pb::TlsIdentity {
+                strategy: Some(pb::tls_identity::Strategy::DnsLikeIdentity(
+                    pb::tls_identity::DnsLikeIdentity { name },
+                )),
+            }),
+            authority_override: self
+                .authority_override
+                .clone()
+                .map(|authority_override| pb::AuthorityOverride { authority_override }),
+        }
+    }
+
+    fn is_add(&self, prev: &HashMap<SocketAddr, EndpointMeta>) -> bool {
+        match prev.get(&self.address) {
+            Some(prev_ep) => prev_ep != self,
+            None => true,
+        }
     }
 }

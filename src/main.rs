@@ -1,7 +1,8 @@
-use linkerd2_mock_dst::{DstService, EndpointsSpec, OverridesSpec};
+use linkerd2_mock_dst::{DstService, EndpointsSpec, FsWatcher, OverridesSpec};
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -31,6 +32,18 @@ struct CliOpts {
     /// `WEIGHT`s are integers. If unspecifified, the default weight of 1000 is used.
     #[structopt(long = "overrides", env = "LINKERD2_MOCK_DST_OVERRIDES", default_value = "", parse(try_from_str = parse_overrides))]
     overrides: OverridesSpec,
+
+    /// A directory that is dynamically watched for endpoints updates
+    ///
+    /// The directory contains files with names in the form of {dst.name}:{port}. Each file should
+    /// contain the json or yaml representation of a list of `EndpointMeta` objects. Note that if such a
+    /// directory is provided the `endpoints` and `overrides` opts will be ignored and the discovery
+    /// state will be derived from the contents of the directory only.
+    #[structopt(
+        long = "endpoints_dir",
+                env = "LINKERD2_MOCK_DST_ENDPOINTS_DIR",  conflicts_with_all = &["overrides", "endpoints"],
+    )]
+    endpoints_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -48,11 +61,21 @@ async fn main() -> Result<(), Termination> {
         endpoints,
         overrides,
         addr,
+        endpoints_dir,
     } = opts;
-    tracing::debug!(?endpoints, ?overrides, ?addr);
+    tracing::debug!(?endpoints, ?overrides, ?addr, ?endpoints_dir);
 
-    let (_sender, svc) = DstService::new(endpoints, overrides);
-    svc.serve(addr).await?;
+    match endpoints_dir {
+        Some(endpoints) => {
+            let (sender, svc) = DstService::empty();
+            let mut fs_watcher = FsWatcher::new(endpoints, sender);
+            futures::try_join!(svc.serve(addr), fs_watcher.watch())?;
+        }
+        None => {
+            let (_sender, svc) = DstService::new(endpoints, overrides);
+            svc.serve(addr).await?;
+        }
+    };
     Ok(())
 }
 
