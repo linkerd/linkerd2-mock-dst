@@ -16,9 +16,11 @@ use tokio::sync::{mpsc, watch, RwLock};
 use tracing_futures::Instrument;
 
 pub use self::fs_watcher::FsWatcher;
+pub use self::identity::IdentityService;
 pub use self::spec::{EndpointsSpec, OverridesSpec, ParseError};
 
 mod fs_watcher;
+mod identity;
 mod spec;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
