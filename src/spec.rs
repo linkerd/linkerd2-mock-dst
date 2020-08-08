@@ -99,10 +99,13 @@ impl FromStr for Endpoints {
                 let span = tracing::error_span!("parse_addr", ?addr);
                 let _g = span.enter();
 
-                // Addresses may have the suffix `#h2` to indicate they support h2 upgrading.
-                let mut parts = addr.splitn(2, '#');
-                match (parts.next(), parts.next()) {
-                    (Some(addr), h2) => match addr.parse() {
+                // Endpoints can be configured for h2 upgrading and identity with the '#' suffix:
+                // - `#h2` supports h2 upgrading
+                // - `#h2#x-identity` supports h2 upgrading and has the `x-identity` TLS identity
+                // - `##x-identity` has the `x-identity` TLS identity
+                let mut parts = addr.splitn(3, '#');
+                match (parts.next(), parts.next(), parts.next()) {
+                    (Some(addr), h2, identity) => match addr.parse() {
                         Ok(addr) => Ok((
                             addr,
                             EndpointMeta {
@@ -110,7 +113,7 @@ impl FromStr for Endpoints {
                                 h2: h2.map(|proto| proto == "h2").unwrap_or(false),
                                 weight: 10_000,
                                 metric_labels: BTreeMap::default(),
-                                tls_identity: None,
+                                tls_identity: identity.map(|id| id.to_owned()),
                                 authority_override: None,
                             },
                         )),

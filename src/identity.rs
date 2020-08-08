@@ -68,6 +68,7 @@ impl IdentityService {
 }
 
 impl Certificates {
+    // Taken from: https://github.com/linkerd/linkerd2-proxy/blob/23995e7fb6eae5ede81048bdf9e4f68f7e81c7a9/linkerd/app/integration/src/identity.rs#L44-L64
     fn load<P>(path: P) -> Result<Certificates, io::Error>
     where
         P: AsRef<Path>,
@@ -97,6 +98,9 @@ impl Identity for IdentityService {
     ) -> Result<tonic::Response<pb::CertifyResponse>, tonic::Status> {
         let pb::CertifyRequest { identity, .. } = request.into_inner();
         if let Some(certs) = self.identities.get(&identity) {
+            // Ideally we'd load the `not_after` value from the `crt.pem`, but
+            // that does not seem to be an option with rustls. Therefore,
+            // create a fake expiration.
             let not_after = SystemTime::now() + Duration::from_secs(666);
             let response = pb::CertifyResponse {
                 leaf_certificate: certs.leaf.clone(),
