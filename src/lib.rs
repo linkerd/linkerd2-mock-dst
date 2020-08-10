@@ -117,17 +117,19 @@ impl DstService {
         let mut endpoints_txs = HashMap::new();
         let mut endpoints_rxs = HashMap::new();
         for (dst, eps) in endpoints.dsts.into_iter() {
-            let (tx, rx) = watch::channel(eps);
+            let (tx, rx) = watch::channel(eps.clone());
             endpoints_txs.insert(dst.clone(), tx);
-            endpoints_rxs.insert(dst, rx);
+            endpoints_rxs.insert(dst.clone(), rx);
+            tracing::info!(?dst, ?eps, "added");
         }
 
         let mut overrides_txs = HashMap::new();
         let mut overrides_rxs = HashMap::new();
         for (dst, eps) in overrides.dsts.into_iter() {
-            let (tx, rx) = watch::channel(eps);
+            let (tx, rx) = watch::channel(eps.clone());
             overrides_txs.insert(dst.clone(), tx);
-            overrides_rxs.insert(dst, rx);
+            overrides_rxs.insert(dst.clone(), rx);
+            tracing::info!(?dst, ?eps, "added");
         }
 
         let inner = Arc::new(Inner {
