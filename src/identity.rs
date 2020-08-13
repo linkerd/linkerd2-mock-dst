@@ -14,6 +14,7 @@ use tracing_futures::Instrument;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+#[derive(Default)]
 pub struct IdentityService {
     identities: HashMap<String, Certificates>,
 }
@@ -29,16 +30,14 @@ impl IdentityService {
 
         for entry in path.read_dir().expect("read_dir call failed") {
             if let Ok(entry) = entry {
-                if let Ok(file_type) = entry.file_type() {
-                    if file_type.is_dir() {
-                        path.push(entry.file_name());
-                        path.push("crt.pem");
-                        let certs = Certificates::load(&path)
-                            .expect("failed to load certificates from crt.pem");
-                        let local_name = entry.file_name().into_string().unwrap();
-                        tracing::info!(?local_name, "added");
-                        identities.insert(local_name, certs);
-                    }
+                if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                    path.push(entry.file_name());
+                    path.push("crt.pem");
+                    let certs = Certificates::load(&path)
+                        .expect("failed to load certificates from crt.pem");
+                    let local_name = entry.file_name().into_string().unwrap();
+                    tracing::info!(?local_name, "added");
+                    identities.insert(local_name, certs);
                 }
             }
         }
@@ -47,8 +46,7 @@ impl IdentityService {
     }
 
     pub fn empty() -> IdentityService {
-        let identities = HashMap::new();
-        IdentityService { identities }
+        IdentityService::default()
     }
 
     pub async fn serve(self, addr: impl Into<SocketAddr>) -> Result<(), Error> {
@@ -78,7 +76,7 @@ impl Certificates {
         let certs = rustls::internal::pemfile::certs(&mut reader)
             .map_err(|_| io::Error::new(ErrorKind::Other, "rustls error reading certs"))?;
         let leaf = certs
-            .get(0)
+            .first()
             .ok_or_else(|| io::Error::new(ErrorKind::Other, "no certs in pemfile"))?
             .as_ref()
             .into();
@@ -101,7 +99,7 @@ impl Identity for IdentityService {
             // Ideally we'd load the `not_after` value from the `crt.pem`, but
             // that does not seem to be an option with rustls. Therefore,
             // create a fake expiration.
-            let not_after = SystemTime::now() + Duration::from_secs(666);
+            let not_after = SystemTime::now() + Duration::from_secs(123_456);
             let response = pb::CertifyResponse {
                 leaf_certificate: certs.leaf.clone(),
                 intermediate_certificates: certs.intermediates.clone(),

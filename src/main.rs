@@ -12,19 +12,20 @@ use structopt::StructOpt;
 )]
 struct CliOpts {
     /// The address that the mock destination service will listen on.
-    #[structopt(long = "dst_addr", default_value = "0.0.0.0:8086")]
+    #[structopt(long = "dst-addr", default_value = "0.0.0.0:8086")]
     dst_addr: SocketAddr,
 
     /// The address that the mock identity service will listen on.
-    #[structopt(long = "identity_addr", default_value = "0.0.0.0:8080")]
+    #[structopt(long = "identity-addr", default_value = "0.0.0.0:8080")]
     identity_addr: SocketAddr,
 
     /// A list of destination endpoints to serve.
     ///
     /// This is parsed as a list of `DESTINATION=ENDPOINTS` pairs, where `DESTINATION` is a DNS name
     /// and port, and `ENDPOINTS` is a comma-separated list of endpoints. Each pair is separated by
-    /// semicolons. An endpoint consists of a an`IP:PORT` and an optional `#h2` suffix, if the
-    /// endpoint supports meshed protocol upgrading.
+    /// semicolons. An endpoint consists of a an`IP:PORT` and the following optional suffixes:
+    /// [`#h2` supports h2 upgrading, `#h2#<IDENTITY>` supports h2 upgrading and has the
+    /// `<IDENTITY>` TLS identity, `##<IDENTITY>` has the `<IDENTITY>` TLS identity].
     #[structopt(long = "endpoints", env = "LINKERD2_MOCK_DST_ENDPOINTS", default_value = "", parse(try_from_str = parse_endpoints))]
     endpoints: EndpointsSpec,
 
@@ -44,7 +45,7 @@ struct CliOpts {
     /// directory is provided the `endpoints` and `overrides` opts will be ignored and the discovery
     /// state will be derived from the contents of the directory only.
     #[structopt(
-        long = "endpoints_dir",
+        long = "endpoints-dir",
                 env = "LINKERD2_MOCK_DST_ENDPOINTS_DIR",  conflicts_with_all = &["overrides", "endpoints"],
     )]
     endpoints_dir: Option<PathBuf>,
@@ -55,7 +56,7 @@ struct CliOpts {
     /// by the identity service. The name of each subdirectory will be the name of the identity. It
     /// should contain a crt.pem that has the certificates that are returned when a certify request
     /// is received for that name.
-    #[structopt(long = "identities_dir", env = "LINKERD2_MOCK_DST_IDENTITIES_DIR")]
+    #[structopt(long = "identities-dir", env = "LINKERD2_MOCK_DST_IDENTITIES_DIR")]
     identities_dir: Option<PathBuf>,
 }
 
@@ -87,16 +88,11 @@ async fn main() -> Result<(), Termination> {
         ?identities_dir
     );
 
-    match identities_dir {
-        Some(identities) => {
-            let svc = IdentityService::new(identities)?;
-            tokio::spawn(svc.serve(identity_addr));
-        }
-        None => {
-            let svc = IdentityService::empty();
-            tokio::spawn(svc.serve(identity_addr));
-        }
-    }
+    let identity_svc = match identities_dir {
+        Some(identities) => IdentityService::new(identities)?,
+        None => IdentityService::empty(),
+    };
+    tokio::spawn(identity_svc.serve(identity_addr));
 
     match endpoints_dir {
         Some(endpoints) => {

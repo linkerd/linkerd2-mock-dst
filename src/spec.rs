@@ -101,8 +101,8 @@ impl FromStr for Endpoints {
 
                 // Endpoints can be configured for h2 upgrading and identity with the '#' suffix:
                 // - `#h2` supports h2 upgrading
-                // - `#h2#x-identity` supports h2 upgrading and has the `x-identity` TLS identity
-                // - `##x-identity` has the `x-identity` TLS identity
+                // - `#h2#<IDENTITY>` supports h2 upgrading and has the `<IDENTITY>` TLS identity
+                // - `##<IDENTITY>` has the `<IDENTITY>` TLS identity
                 let mut parts = addr.splitn(3, '#');
                 match (parts.next(), parts.next(), parts.next()) {
                     (Some(addr), h2, identity) => match addr.parse() {
@@ -113,7 +113,7 @@ impl FromStr for Endpoints {
                                 h2: h2.map(|proto| proto == "h2").unwrap_or(false),
                                 weight: 10_000,
                                 metric_labels: BTreeMap::default(),
-                                tls_identity: identity.map(|id| id.to_owned()),
+                                tls_identity: identity.map(str::to_owned),
                                 authority_override: None,
                             },
                         )),
