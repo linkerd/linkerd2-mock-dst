@@ -1,4 +1,6 @@
-use linkerd2_mock_dst::{DstService, EndpointsSpec, FsWatcher, IdentityService, OverridesSpec};
+use linkerd2_mock_dst::{
+    Controller, DstService, EndpointsSpec, FsWatcher, IdentityService, OverridesSpec,
+};
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
@@ -11,13 +13,9 @@ use structopt::StructOpt;
     about = "A mock Linkerd 2 Destination server."
 )]
 struct CliOpts {
-    /// The address that the mock destination service will listen on.
-    #[structopt(long = "dst-addr", default_value = "0.0.0.0:8086")]
-    dst_addr: SocketAddr,
-
-    /// The address that the mock identity service will listen on.
-    #[structopt(long = "identity-addr", default_value = "0.0.0.0:8080")]
-    identity_addr: SocketAddr,
+    /// The address that the mock destination and identity service will listen on.
+    #[structopt(long = "addr", default_value = "0.0.0.0:8086")]
+    addr: SocketAddr,
 
     /// A list of destination endpoints to serve.
     ///
@@ -72,37 +70,33 @@ async fn main() -> Result<(), Termination> {
 
     let opts = CliOpts::from_args();
     let CliOpts {
-        dst_addr,
-        identity_addr,
+        addr,
         endpoints,
         overrides,
         endpoints_dir,
         identities_dir,
     } = opts;
     tracing::debug!(
-        ?dst_addr,
-        ?identity_addr,
+        ?addr,
         ?endpoints,
         ?overrides,
         ?endpoints_dir,
         ?identities_dir
     );
 
-    let identity_svc = match identities_dir {
-        Some(identities) => IdentityService::new(identities)?,
-        None => IdentityService::empty(),
-    };
-    tokio::spawn(identity_svc.serve(identity_addr));
+    let identity_svc = IdentityService::new(identities_dir)?;
 
     match endpoints_dir {
         Some(endpoints) => {
-            let (sender, svc) = DstService::empty();
+            let (sender, dst_svc) = DstService::empty();
+            let controller = Controller::new(dst_svc, identity_svc);
             let mut fs_watcher = FsWatcher::new(endpoints, sender);
-            futures::try_join!(svc.serve(dst_addr), fs_watcher.watch())?;
+            futures::try_join!(controller.serve(addr), fs_watcher.watch())?;
         }
         None => {
-            let (_sender, svc) = DstService::new(endpoints, overrides);
-            svc.serve(dst_addr).await?;
+            let (_sender, dst_svc) = DstService::new(endpoints, overrides);
+            let controller = Controller::new(dst_svc, identity_svc);
+            controller.serve(addr).await?;
         }
     };
 

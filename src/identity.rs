@@ -1,18 +1,11 @@
-use linkerd2_proxy_api::identity::{
-    self as pb,
-    identity_server::{Identity, IdentityServer},
-};
+use linkerd2_proxy_api::identity::{self as pb, identity_server::Identity};
 use std::{
     collections::HashMap,
     fs::File,
     io::{self, BufReader, ErrorKind},
-    net::SocketAddr,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
-use tracing_futures::Instrument;
-
-pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[derive(Default)]
 pub struct IdentityService {
@@ -25,43 +18,26 @@ struct Certificates {
 }
 
 impl IdentityService {
-    pub fn new(mut path: PathBuf) -> Result<IdentityService, io::Error> {
+    pub fn new(identities_dir: Option<PathBuf>) -> Result<IdentityService, io::Error> {
         let mut identities = HashMap::new();
 
-        for entry in path.read_dir().expect("read_dir call failed") {
-            if let Ok(entry) = entry {
-                if entry.file_type().map_or(false, |ft| ft.is_dir()) {
-                    path.push(entry.file_name());
-                    path.push("crt.pem");
-                    let certs = Certificates::load(&path)
-                        .expect("failed to load certificates from crt.pem");
-                    let local_name = entry.file_name().into_string().unwrap();
-                    tracing::info!(?local_name, "added");
-                    identities.insert(local_name, certs);
+        if let Some(mut path) = identities_dir {
+            for entry in path.read_dir().expect("read_dir call failed") {
+                if let Ok(entry) = entry {
+                    if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                        path.push(entry.file_name());
+                        path.push("crt.pem");
+                        let certs = Certificates::load(&path)
+                            .expect("failed to load certificates from crt.pem");
+                        let local_name = entry.file_name().into_string().unwrap();
+                        tracing::info!(?local_name, "added");
+                        identities.insert(local_name, certs);
+                    }
                 }
             }
         }
 
         Ok(IdentityService { identities })
-    }
-
-    pub fn empty() -> IdentityService {
-        IdentityService::default()
-    }
-
-    pub async fn serve(self, addr: impl Into<SocketAddr>) -> Result<(), Error> {
-        let addr = addr.into();
-        let span = tracing::info_span!("IdentityService::serve", listen.addr = %addr);
-        tracing::info!(parent: &span, "Starting identity server...");
-
-        tonic::transport::Server::builder()
-            .trace_fn(|headers| tracing::debug_span!("request", ?headers))
-            .add_service(IdentityServer::new(self))
-            .serve(addr)
-            .instrument(span)
-            .await?;
-
-        Ok(())
     }
 }
 
