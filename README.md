@@ -47,8 +47,24 @@ ARGS:
 
 ## Examples
 
+Mock destinations for the `foo.ns.svc.cluster.local` service:
+
 ```console
 :; RUST_LOG=linkerd2_mock_dst=info \
    LINKERD2_MOCK_DSTS='http://foo.ns.svc.cluster.local:8080=127.0.0.1:1234,127.0.0.1:1235;http://bar.ns.svc.cluster.local:8081=127.0.0.1:4321' \
+   cargo run
+```
+
+Mock identity for the `foo-ns1-ca1` identity name:
+
+```console
+:; ls /path/to/identities
+foo-ns1-ca1/
+
+:; ls /path/to/identities/foo-ns1-ca1/
+crt.pem csr.der key.p8
+
+:; RUST_LOG=linkerd2_mock_dst=info \
+   LINKERD2_MOCK_DST_IDENTITIES_DIR='/path/to/identities/' \
    cargo run
 ```

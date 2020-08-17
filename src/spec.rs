@@ -1,4 +1,4 @@
-use super::{Dst, EndpointMeta, Endpoints, Overrides};
+use crate::{Dst, EndpointMeta, Endpoints, Overrides};
 use std::collections::{BTreeMap, HashMap};
 use std::{default::Default, error::Error, str::FromStr};
 use tracing_error::{prelude::*, TracedError};
@@ -75,10 +75,7 @@ impl FromStr for Dst {
         let mut parts = dst.splitn(2, ":");
         match (parts.next(), parts.next()) {
             (Some(name), Some(port)) => match port.parse() {
-                Ok(port) => Ok(Dst {
-                    port,
-                    name: name.into(),
-                }),
+                Ok(port) => Ok(Dst::new(name.into(), port)),
                 Err(_) => parse_error!("invalid port"),
             },
             _ => parse_error!("invalid destination"),
@@ -99,20 +96,23 @@ impl FromStr for Endpoints {
                 let span = tracing::error_span!("parse_addr", ?addr);
                 let _g = span.enter();
 
-                // Addresses may have the suffix `#h2` to indicate they support h2 upgrading.
-                let mut parts = addr.splitn(2, '#');
-                match (parts.next(), parts.next()) {
-                    (Some(addr), h2) => match addr.parse() {
+                // Endpoints can be configured for h2 upgrading and identity with the '#' suffix:
+                // - `#h2` supports h2 upgrading
+                // - `#h2#<IDENTITY>` supports h2 upgrading and has the `<IDENTITY>` TLS identity
+                // - `##<IDENTITY>` has the `<IDENTITY>` TLS identity
+                let mut parts = addr.splitn(3, '#');
+                match (parts.next(), parts.next(), parts.next()) {
+                    (Some(addr), h2, identity) => match addr.parse() {
                         Ok(addr) => Ok((
                             addr,
-                            EndpointMeta {
-                                address: addr,
-                                h2: h2.map(|proto| proto == "h2").unwrap_or(false),
-                                weight: 10_000,
-                                metric_labels: BTreeMap::default(),
-                                tls_identity: None,
-                                authority_override: None,
-                            },
+                            EndpointMeta::new(
+                                addr,
+                                h2.map(|proto| proto == "h2").unwrap_or(false),
+                                10_000,
+                                BTreeMap::default(),
+                                identity.map(str::to_owned),
+                                None,
+                            ),
                         )),
                         Err(_) => parse_error!("invalid socket address"),
                     },
@@ -162,7 +162,7 @@ impl FromStr for Overrides {
 
     #[tracing::instrument(name = "Overrides::from_str", level = "error")]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let overrides = s
+        let dsts = s
             .split(',')
             .map(|addr| {
                 let span = tracing::error_span!("parse_addr", ?addr);
@@ -184,6 +184,6 @@ impl FromStr for Overrides {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(Self(overrides))
+        Ok(Overrides::new(dsts))
     }
 }
